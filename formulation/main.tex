@@ -1,0 +1,19 @@
+\documentclass{article}
+\usepackage{graphicx} % Required for inserting images
+\usepackage{fullpage}
+\title{Langevin Monte Carlo}
+\author{Hrishikesh Belagali}
+\usepackage{pdflscape}
+\date{October 2024}
+\usepackage{physics}
+\usepackage{amssymb}
+\begin{document} 
+\maketitle
+Metropolis-adjusted Langevin Algorithm or Langevin Monte Carlo is used to get samples from an intractable probability distribution function. 
+It combines the equation of Langevin diffusion (which simulates a particle moving in a fluid with random fluctuations) with the Metropolis Hastings Algorithm. 
+If we have a probability distribution function $\pi(\mathbf X)$ where $\mathbf X$ is a d-dimensional vector, then we can define the Langevin distribution as 
+$$U(\mathbf X) = \log \pi(\mathbf X)$$ The gradient of the Langevin distribution guides the random walk towards high probability areas. We start with an initial configuration $\mathbf X_0$. New states are proposed by the following formula 
+$$\mathbf{X^*_{k+1}} = \mathbf{X_k} + \epsilon \nabla U(\mathbf X_k) + \sqrt{2\epsilon}\xi_k$$ where $\xi_k \backsim \mathcal N_d(0, \mathbf I)$, $\epsilon$ is the step size ($0 < \epsilon \ll 1$). The acceptance criterion for each new state is given by 
+$$\gamma = \text{min} \pqty{1, \frac{\pi(\mathbf{X^*_{k+1}})q(\mathbf X_k | \mathbf X^*_{k+1})}{\pi(\mathbf X_k)q(\mathbf X^*_{k+1} | \mathbf X_k)}}$$
+where $$q(\mathbf X^* | \mathbf X) = \exp{-\frac{1}{4\epsilon}\norm{\mathbf X^* - \mathbf X - \epsilon \nabla U(\mathbf X)}_2^2}$$ 
+\end{document}
