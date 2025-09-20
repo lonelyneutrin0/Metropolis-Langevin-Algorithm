@@ -1,3 +1,3 @@
 """Metropolis Adjusted Langevin Algorithm (MALA) for MCMC sampling."""
 
-from .foo import bar
+from .mala.foo import bar
