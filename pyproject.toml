@@ -1,0 +1,17 @@
+[build-system]
+requires = ["hatchling >= 1.26"]
+build-backend = "hatchling.build"
+
+[project]
+name = "mala"         
+version = "0.0.1"
+authors = [ {name = "Hrishikesh Belagali", email = "belagal1@msu.edu"}]
+description = "Metropolis-adjusted Langevin Algorithm"
+requires-python = ">= 3.9"
+license= "MIT"
+dependencies = [
+    "ase~=3.26.0",
+]
+
+[project.optional-dependencies]
+examples = []
