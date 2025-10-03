@@ -1,172 +1,187 @@
-"""Metropolis Adjusted Langevin Algorithm (MALA) for MCMC sampling using ASE."""
-from ase.md.langevin import Langevin
-from ase import Atoms
-from ase import units
-
-from typing import Optional, List
-
 import numpy as np
-from numpy.typing import NDArray
+from ase.md.md import MolecularDynamics
+from ase import units
+import warnings
 
-class MALA(Langevin):
-    accepts: List[bool]
-    """The series of accepts."""
-    rejects: List[bool]
-    """The series of rejects."""
+class MALA(MolecularDynamics):
+    """
+    Metropolis-Adjusted Langevin Algorithm (MALA) sampler.
+    
+    This implements MALA as a subclass of ASE's MolecularDynamics,
+    allowing it to be used with the standard ASE interface while
+    performing Bayesian sampling instead of deterministic dynamics.
+    """
+    
+    def __init__(self, atoms, timestep, temperature=300*units.kB, 
+                 step_size=None, trajectory=None, logfile=None, 
+                 loginterval=1, append_trajectory=False):
+        """
+        Initialize MALA sampler.
+        
+        Parameters:
+        -----------
+        atoms : Atoms
+            The atoms object to sample
+        timestep : float
+            Time step (here used as iteration counter for compatibility)
+        temperature : float
+            Temperature in energy units (default: 300K in eV)
+        step_size : float, optional
+            MALA step size. If None, estimated from temperature
+        trajectory : str or Trajectory, optional
+            Trajectory file to save samples
+        logfile : str or file, optional
+            Log file for energies and acceptance rates
+        loginterval : int
+            Interval for logging
+        append_trajectory : bool
+            Whether to append to existing trajectory
+        """
+        
+        # Initialize parent MolecularDynamics class
+        super().__init__(atoms, timestep, trajectory, logfile, loginterval, 
+                        append_trajectory=append_trajectory)
+        
+        # Ensure loginterval is set (parent class sometimes doesn't set it)
+        self.loginterval = loginterval
+        
+        self.temperature = temperature
+        self.beta = 1.0 / temperature  # Inverse temperature
+        
+        # Set step size
+        if step_size is None:
+            self.step_size = np.sqrt(2.0 * temperature * timestep)
+        else:
+            self.step_size = step_size
+            
+        # Sampling statistics
+        self.n_accepted = 0
+        self.n_proposed = 0
+        self.current_energy = None
+        self.current_forces = None
+        
+        self._update_energy_forces()
+    
+    def _update_energy_forces(self):
+        """Update current energy and forces."""
+        self.current_energy = self.atoms.get_potential_energy()
+        self.current_forces = self.atoms.get_forces()
+    
+    def _propose_move(self):
+        """Generate MALA proposal."""
+        positions = self.atoms.get_positions()
+        forces = self.current_forces
+        
+        # MALA proposal: x' = x + ε²/2 * ∇log p(x) + ε * η
+        # where ∇log p(x) = β * forces (since E = -log p up to const)
+        drift = 0.5 * self.step_size**2 * self.beta * forces
+        noise = self.step_size * np.random.normal(size=positions.shape)
+        
+        proposed_positions = positions + drift + noise
+        
+        return proposed_positions
+    
+    def _log_transition_probability(self, x_old, x_new, forces_old, forces_new):
+        """
+        Compute log transition probability ratio for MALA.
+        
+        log[q(x_old|x_new) / q(x_new|x_old)]
+        """
+        # Drift terms
+        drift_forward = 0.5 * self.step_size**2 * self.beta * forces_old
+        drift_backward = 0.5 * self.step_size**2 * self.beta * forces_new
+        
+        # Mean of reverse transition
+        mean_reverse = x_new + drift_backward
+        
+        # Mean of forward transition  
+        mean_forward = x_old + drift_forward
+        
+        # Log probability difference (Gaussian transition kernel)
+        diff_reverse = x_old - mean_reverse
+        diff_forward = x_new - mean_forward
+        
+        log_q_ratio = -0.5 / self.step_size**2 * (
+            np.sum(diff_reverse**2) - np.sum(diff_forward**2)
+        )
+        
+        return log_q_ratio
+    
+    def _metropolis_step(self):
+        """Perform one MALA step with Metropolis acceptance."""
+        old_positions = self.atoms.get_positions().copy()
+        old_energy = self.current_energy
+        old_forces = self.current_forces.copy()
+        
+        proposed_positions = self._propose_move()
+        
+        self.atoms.set_positions(proposed_positions)
+        try:
+            proposed_energy = self.atoms.get_potential_energy()
+            proposed_forces = self.atoms.get_forces()
+        except Exception as e:
 
-    @property
-    def acceptance_ratio(self) -> float:
-        """The acceptance ratio."""
-        total = len(self.accepts) + len(self.rejects)
-
-        if total == 0:
+            self.atoms.set_positions(old_positions)
+            warnings.warn(f"Energy calculation failed: {e}")
+            return False
+        
+        log_alpha = (
+            self.beta * (old_energy - proposed_energy) +
+            self._log_transition_probability(
+                old_positions, proposed_positions, old_forces, proposed_forces
+            )
+        )
+        
+        # Accept or reject
+        if log_alpha > 0 or np.random.rand() < np.exp(log_alpha):
+            # Accept
+            self.current_energy = proposed_energy
+            self.current_forces = proposed_forces
+            self.n_accepted += 1
+            accepted = True
+        else:
+            # Reject - restore old state
+            self.atoms.set_positions(old_positions)
+            accepted = False
+        
+        self.n_proposed += 1
+        return accepted
+    
+    def step(self):
+        """Perform one MALA sampling step."""
+        accepted = self._metropolis_step()
+        
+        self.nsteps += 1
+        
+        return accepted
+    
+    def get_acceptance_rate(self):
+        """Get current acceptance rate."""
+        if self.n_proposed == 0:
             return 0.0
-        
-        return sum(self.accepts) / total
+        return self.n_accepted / self.n_proposed
     
-    def __init__( 
-            self,
-            atoms: Atoms, 
-            timestep: float, 
-            friction: float,
-            fixcm: bool = True, 
-            *,
-            temperature_K: Optional[float] = None,
-            rng=None, 
-            **kwargs,
-    ):
-        """
-        Parameters
-        ----------
-        atoms: Atoms object
-            The atoms to perform MALA on.
-
-        timestep: float
-            The time step  in ASE time units.
-
-        temperature_K: float
-            The temperature in Kelvin.
-
-        friction: float
-            A friction coefficient in inverse ASE time units.
+    def run(self, steps):
+        """Run MALA sampling for specified number of steps."""
+        for i in range(steps):
+            accepted = self.step()
+            
+            if self.nsteps % self.loginterval == 0:
+                acc_rate = self.get_acceptance_rate()
+                if self.logfile is not None:
+                    self.logfile.write(
+                        f"{self.nsteps:6d} {self.current_energy:12.4f} "
+                        f"{acc_rate:8.3f} {self.n_accepted:6d} {self.n_proposed:6d}\n"
+                    )
+                    self.logfile.flush()
+                    
+                if self.nsteps % 1000 == 0:
+                    print(f"Step {self.nsteps}: Energy={self.current_energy:.4f}, "
+                          f"AccRate={acc_rate:.3f}, Accepted={self.n_accepted}/{self.n_proposed}")
+            
+            # Write trajectory
+            if self.trajectory is not None:
+                self.trajectory.write(self.atoms)
         
-        fixcm: bool, optional
-            If True, the position and momentum of the 
-            center of mass is kept unchanged. Default is True. 
-        
-        rng: RNG Object, optional
-            A random number generator object. If None, the default 
-            numpy random number generator is used.
-        
-        **kwargs:
-            Additional arguments passed to the Langevin parent class.
-"""
-        
-        super().__init__(
-            atoms=atoms, 
-            timestep=timestep, 
-            temperature_K=temperature_K, 
-            friction=friction, 
-            fixcm=fixcm, 
-            rng=rng, 
-            **kwargs
-        )
-        self.temperature_K = temperature_K \
-            if temperature_K is not None else 273.15
-
-        self.accepts = [] 
-        self.rejects = []
-    
-    def calculate_acceptance_probability(
-        self,
-        x_old: NDArray, 
-        x_new: NDArray,
-        forces_old: NDArray,
-        forces_new: NDArray,
-        energy_old: float,
-        energy_new: float,
-    ) -> float:
-        r"""
-        Calculate the acceptance probability for the MALA move.
-        
-        For overdamped Langevin dynamics, 
-        $$\dd x = -\nabla U(x) \dd t + \sqrt{2/\beta} \dd W$$
-
-        The acceptance probability naturally accounts for
-        asymmetric proposals.
-        """
-
-        kT = units.kB * self.temperature_K
-
-        drift_coefficient = self.dt / (self.masses[:, np.newaxis] * self.fr)
-        diffusion_coefficient = 2 * self.dt * kT
-
-        # Forward proposal: x_old -> x_new
-        expected_move_forward = drift_coefficient * forces_old 
-        actual_move = x_new - x_old
-        noise_forward = actual_move - expected_move_forward
-
-        # Reverse proposal: x_new -> x_old
-        expected_move_backward = drift_coefficient * forces_new
-        backward_move = x_old - x_new
-        noise_backward = backward_move - expected_move_backward
-
-        # Log of proposal probabilities
-        variance = diffusion_coefficient / self.masses[:, np.newaxis]
-
-        log_q_forward = -0.5 * np.sum((noise_forward**2) / variance)
-        log_q_backward = -0.5 * np.sum((noise_backward**2) / variance)
-
-        log_alpha = (-(energy_new - energy_old)/kT + 
-                     log_q_backward - log_q_forward)
-
-        return min(1.0, np.exp(log_alpha))
-
-    def step(self, forces=None):
-        """Perform one MALA step."""
-
-        x_old = self.atoms.get_positions().copy()
-        v_old = self.atoms.get_velocities().copy() \
-            if self.atoms.get_velocities() is not None else None
-        
-        energy_old = self.atoms.get_potential_energy()
-
-        if forces is None:
-            forces_old =  self.atoms.get_forces(md=True)
-        else:
-            forces_old = forces.copy()
-        
-        forces_new = super().step(forces=forces_old)
-
-        x_new = self.atoms.get_positions()
-        energy_new = self.atoms.get_potential_energy()
-
-
-        acceptance_prob = self.calculate_acceptance_probability(
-            x_old=x_old,
-            x_new=x_new,
-            forces_old=forces_old,
-            forces_new=forces_new,
-            energy_old=energy_old,
-            energy_new=energy_new,
-        )
-
-        if self.rng.random() < acceptance_prob:
-            self.accepts.append(True)
-            self.rejects.append(False)
-            return forces_new
-
-        else:
-            self.atoms.set_positions(x_old)
-            self.rejects.append(True)
-            self.accepts.append(False)
-            if v_old is not None:
-                self.atoms.set_velocities(v_old)
-        
-            return forces_old
-        
-    def reset_statistics(self): 
-        """Reset the acceptance/rejection statistics."""
-        self.accepts = []
-        self.rejects = []
-        
+        final_acc_rate = self.get_acceptance_rate()
+        return final_acc_rate
