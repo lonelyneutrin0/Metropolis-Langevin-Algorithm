@@ -25,9 +25,9 @@ class MALA(MolecularDynamics):
         timestep : float
             Time step (here used as iteration counter for compatibility)
         temperature : float
-            Temperature in energy units (default: 300K in eV)
+            kT in energy units (default: 300K in eV)
         step_size : float, optional
-            MALA step size. If None, estimated from temperature
+            Proposal noise scale
         trajectory : str or Trajectory, optional
             Trajectory file to save samples
         logfile : str or file, optional
