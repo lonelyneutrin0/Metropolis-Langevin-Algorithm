@@ -42,19 +42,16 @@ class MALA(MolecularDynamics):
         super().__init__(atoms, timestep, trajectory, logfile, loginterval, 
                         append_trajectory=append_trajectory)
         
-        # Ensure loginterval is set (parent class sometimes doesn't set it)
         self.loginterval = loginterval
         
         self.temperature = temperature
-        self.beta = 1.0 / temperature  # Inverse temperature
+        self.beta = 1.0 / temperature
         
-        # Set step size
         if step_size is None:
             self.step_size = np.sqrt(2.0 * temperature * timestep)
         else:
             self.step_size = step_size
             
-        # Sampling statistics
         self.n_accepted = 0
         self.n_proposed = 0
         self.current_energy = None
@@ -87,17 +84,14 @@ class MALA(MolecularDynamics):
         
         log[q(x_old|x_new) / q(x_new|x_old)]
         """
-        # Drift terms
         drift_forward = 0.5 * self.step_size**2 * self.beta * forces_old
         drift_backward = 0.5 * self.step_size**2 * self.beta * forces_new
         
-        # Mean of reverse transition
         mean_reverse = x_new + drift_backward
         
-        # Mean of forward transition  
         mean_forward = x_old + drift_forward
         
-        # Log probability difference (Gaussian transition kernel)
+        # Detailed balance term
         diff_reverse = x_old - mean_reverse
         diff_forward = x_new - mean_forward
         
@@ -131,16 +125,13 @@ class MALA(MolecularDynamics):
                 old_positions, proposed_positions, old_forces, proposed_forces
             )
         )
-        
-        # Accept or reject
+
         if log_alpha > 0 or np.random.rand() < np.exp(log_alpha):
-            # Accept
             self.current_energy = proposed_energy
             self.current_forces = proposed_forces
             self.n_accepted += 1
             accepted = True
         else:
-            # Reject - restore old state
             self.atoms.set_positions(old_positions)
             accepted = False
         
@@ -179,7 +170,6 @@ class MALA(MolecularDynamics):
                     print(f"Step {self.nsteps}: Energy={self.current_energy:.4f}, "
                           f"AccRate={acc_rate:.3f}, Accepted={self.n_accepted}/{self.n_proposed}")
             
-            # Write trajectory
             if self.trajectory is not None:
                 self.trajectory.write(self.atoms)
         
