@@ -1,0 +1,32 @@
+\documentclass{article} 
+\usepackage{fullpage}
+\usepackage{physics}
+\usepackage{amssymb}
+\usepackage{amsmath}
+\usepackage{mathtools}
+
+\title{Langevin Monte Carlo for Ising Model Sampling}
+\author{Hrishikesh Belagali}
+\date{\today}
+
+\begin{document}
+\maketitle
+\noindent Overdamped Langevin dynamics uses the following discrete update equation to generate new states - 
+$$X_{k+1} \coloneq X_k - \frac{1}{\gamma} \nabla U(X_k) + \frac{\sqrt{2} \sigma}{\gamma}\xi_k$$
+where $\gamma$ is the friction coefficient, $\sigma$ is the noise strength, and $\xi_k \sim \mathcal{N}(0, I)$. \\\\
+Since Langevin dynamics is guaranteed to sample from $\exp{-\beta U(X)}$
+we can use it as a sampling algorithm by setting $U = - \log \pi$ where $\pi$ is some probability distribution. 
+Langevin Monte Carlo incorporates a Metropolis-Hastings accept-reject step. New steps are proposed 
+by the following equation - 
+$$\tilde{X}_{k+1} \coloneq X_k + \tau \nabla \log(\pi(X_k)) + \sqrt{2\tau} \xi_k,$$
+where $\tau$ is the step-size parameter, and accepted with probability 
+$$\alpha(X_k, \tilde{X}_{k+1}) = \min \left\{ 1, \frac{\pi(\tilde{X}_{k+1}) q(\tilde{X}_{k+1} \mid X_k)}{\pi(X_k) q(X_k \mid \tilde{X}_{k+1})} \right\},$$
+where $q(x \mid y)$ is the transition density from state $x$ to $y$. This requires the target distribution $\pi$ to be differentiable.  \\\\
+Suppose we want to sample from an Ising chain with $N$ spins, coupling strength $J$, and external field $h$.
+I'm having trouble figuring out how to define a differentiable potential 
+$U$ such that the Langevin Monte Carlo samples from the Ising distribution. If we represent 
+each $X_k = \{\sigma_i\}_{i=1}^N$ where $\sigma_i \in \{-1, 1\}$, and adjacent 
+states differ by a single spin flip, then I don't understand how to compute the gradient.
+One idea I had was to relax each $\sigma_i$ to take values in $[-1, 1]$ instead of $\{-1, 1\}$,
+but I'm confused on how to define the potential in that case. 
+\end{document}
