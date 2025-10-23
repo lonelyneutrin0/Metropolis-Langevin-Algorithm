@@ -3,3 +3,9 @@ __pycache__/
 *.pyc
 .mypy_cache/
 dist/
+*.aux
+*.log
+*.out
+*.fls
+*.synctex.gz
+*.fdb_latexmk
